@@ -5,15 +5,22 @@ import dezero
 from typing import NoReturn, Union
 
 
+try:
+    import cupy
+    array_types = (np.ndarray, cupy.ndarray)
+except ImportError:
+    array_types = (np.ndarray)
+
+
 class Variable:
     __array_priority__ = 200
 
-    def __init__(self, data: Union[np.ndarray, None], name: Union[str, None] = None) -> None:
+    def __init__(self, data, name: Union[str, None] = None) -> None:
         if data is not None:
-            if not isinstance(data, np.ndarray):
+            if not isinstance(data, array_types):
                 raise TypeError("{} is not supported".format(type(data)))
-        self.data: Union[np.ndarray, None] = data  # ndarray
-        self.grad: Union[Variable, None] = None
+        self.data = data  # ndarray
+        self.grad = None
         self.name: Union[str, None] = name
         self.creator: Union[Function, None] = None
         self.generation: int = 0
@@ -24,7 +31,8 @@ class Variable:
 
     def backward(self, retain_grad: Union[None, bool] = False, create_graph: Union[None, bool] = False):
         if self.grad is None:
-            self.grad = Variable(np.ones_like(self.data))
+            xp = dezero.cuda.get_array_module(self.data)
+            self.grad = Variable(xp.ones_like(self.data))
         funcs = []
         seen_set: set[Union[Function, None]] = set()
 
@@ -64,6 +72,14 @@ class Variable:
 
     def sum(self, axis=None, keepdims=False):
         return dezero.functions.sum(self, axis, keepdims)
+
+    def to_cpu(self):
+        if self.data is not None:
+            self.data = dezero.cuda.as_numpy(self.data)
+
+    def to_gpu(self):
+        if self.data is not None:
+            self.data = dezero.cuda.as_cupy(self.data)
 
     @ property
     def T(self):
@@ -114,10 +130,10 @@ class Function:
             self.outputs = [weakref.ref(output) for output in outputs]
         return outputs if len(outputs) > 1 else outputs[0]
 
-    def forward(self, xs: "list[np.ndarray]"):
+    def forward(self, xs):
         raise NotImplementedError()
 
-    def backward(self, gys: "list[np.ndarray]"):
+    def backward(self, gys):
         raise NotImplementedError()
 
 
@@ -225,9 +241,9 @@ def no_grad():
     return using_config('enable_backprop', False)
 
 
-def as_array(x):
+def as_array(x, array_module=np):
     if np.isscalar(x):
-        return np.array(x)
+        return array_module.array(x)
     return x
 
 
@@ -238,32 +254,32 @@ def as_variable(obj):
 
 
 def add(x0, x1):
-    x1 = as_array(x1)
+    x1 = as_array(x1, dezero.cuda.get_array_module(x0.data))
     return Add()(x0, x1)
 
 
 def mul(x0, x1):
-    x1 = as_array(x1)
+    x1 = as_array(x1, dezero.cuda.get_array_module(x0.data))
     return Mul()(x0, x1)
 
 
 def sub(x0, x1):
-    x1 = as_array(x1)
+    x1 = as_array(x1, dezero.cuda.get_array_module(x0.data))
     return Sub()(x0, x1)
 
 
 def rsub(x0, x1):
-    x1 = as_array(x1)
+    x1 = as_array(x1, dezero.cuda.get_array_module(x0.data))
     return Sub()(x1, x0)
 
 
 def div(x0, x1):
-    x1 = as_array(x1)
+    x1 = as_array(x1, dezero.cuda.get_array_module(x0.data))
     return Div()(x0, x1)
 
 
 def rdiv(x0, x1):
-    x1 = as_array(x1)
+    x1 = as_array(x1, dezero.cuda.get_array_module(x0.data))
     return Div()(x1, x0)
 
 
